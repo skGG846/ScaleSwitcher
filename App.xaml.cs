@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows;
 using Forms = System.Windows.Forms;
@@ -15,6 +16,8 @@ namespace ScaleSwitcher
         protected override void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
 
             _settings = SettingsManager.Load();
 
@@ -38,31 +41,70 @@ namespace ScaleSwitcher
             }
         }
 
+        private void LogDebug(string message)
+        {
+            try
+            {
+                string logPath = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                    "ScaleSwitcher",
+                    "debug.log");
+                var dir = Path.GetDirectoryName(logPath);
+                if (dir != null && !Directory.Exists(dir))
+                {
+                    Directory.CreateDirectory(dir);
+                }
+                File.AppendAllText(logPath, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+            }
+            catch
+            {
+                // Ignore
+            }
+        }
+
         private void CycleDpi()
         {
             _settings = SettingsManager.Load(); // reload in case it changed
+            LogDebug($"ActiveDpiPercentages: {string.Join(", ", _settings.ActiveDpiPercentages)}");
             if (_settings.ActiveDpiPercentages.Count == 0) return;
 
             var displays = DisplayManager.GetDisplays();
-            if (_settings.TargetMonitorIndex >= displays.Count) return;
+            if (_settings.TargetMonitorIndex >= displays.Count)
+            {
+                LogDebug($"TargetMonitorIndex {_settings.TargetMonitorIndex} out of range (Displays: {displays.Count})");
+                return;
+            }
 
             var targetDisplay = displays[_settings.TargetMonitorIndex];
+            LogDebug($"Target Monitor: {targetDisplay.DeviceName}, Current DPI: {targetDisplay.CurrentDpi?.Percentage}%");
 
             // Initialize cycle index based on current DPI if possible
             if (targetDisplay.CurrentDpi != null && _settings.ActiveDpiPercentages.Contains(targetDisplay.CurrentDpi.Percentage))
             {
                 _currentScaleCycleIndex = _settings.ActiveDpiPercentages.IndexOf(targetDisplay.CurrentDpi.Percentage);
+                LogDebug($"Current DPI in active list. Index initialized to {_currentScaleCycleIndex}");
+            }
+            else
+            {
+                LogDebug($"Current DPI ({targetDisplay.CurrentDpi?.Percentage}%) NOT in active list!");
             }
 
             // Next index
             _currentScaleCycleIndex = (_currentScaleCycleIndex + 1) % _settings.ActiveDpiPercentages.Count;
             int nextPercentage = _settings.ActiveDpiPercentages[_currentScaleCycleIndex];
+            LogDebug($"Next Percentage: {nextPercentage}% (index {_currentScaleCycleIndex})");
 
             // Find DpiInfo
             var nextDpi = targetDisplay.AvailableDpis.FirstOrDefault(d => d.Percentage == nextPercentage);
             if (nextDpi != null)
             {
-                DisplayManager.SetDpi(targetDisplay, nextDpi);
+                LogDebug($"Applying DPI: {nextDpi.Percentage}% (RelativeIndex: {nextDpi.RelativeIndex})");
+                bool success = DisplayManager.SetDpi(targetDisplay, nextDpi);
+                LogDebug($"SetDpi success: {success}");
+            }
+            else
+            {
+                LogDebug($"Target DPI {nextPercentage}% NOT found in AvailableDpis! Available: {string.Join(", ", targetDisplay.AvailableDpis.Select(d => d.Percentage))}");
             }
         }
 

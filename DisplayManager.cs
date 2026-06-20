@@ -95,48 +95,71 @@ namespace ScaleSwitcher
             }
         }
 
+        private static readonly Dictionary<string, int> RecommendedDpiCache = new();
+
         private static void PopulateDpis(DisplayInfo info)
         {
             // Get current DPI percentage
             NativeMethods.GetDpiForMonitor(info.MonitorHandle, 0, out uint dpiX, out _);
             int currentPercentage = (int)(dpiX * 100 / 96);
 
-            // Get relative index using SPI_GETLOGICALDPIOVERRIDE
-            int currentRelativeIndex = 0;
-            IntPtr ptr = Marshal.AllocHGlobal(4);
-            try
+            int recommendedPercentage;
+            if (RecommendedDpiCache.TryGetValue(info.DeviceName, out int cachedRecommended))
             {
-                if (NativeMethods.SystemParametersInfo(NativeMethods.SPI_GETLOGICALDPIOVERRIDE, info.MonitorIndex, ptr, 0))
+                recommendedPercentage = cachedRecommended;
+            }
+            else
+            {
+                // Get relative index using SPI_GETLOGICALDPIOVERRIDE
+                int currentRelativeIndex = 0;
+                IntPtr ptr = Marshal.AllocHGlobal(4);
+                try
                 {
-                    currentRelativeIndex = Marshal.ReadInt32(ptr);
+                    if (NativeMethods.SystemParametersInfo(NativeMethods.SPI_GETLOGICALDPIOVERRIDE, info.MonitorIndex, ptr, 0))
+                    {
+                        currentRelativeIndex = Marshal.ReadInt32(ptr);
+                    }
+                }
+                finally
+                {
+                    Marshal.FreeHGlobal(ptr);
+                }
+
+                int arrayIndex = Array.IndexOf(DpiArray, currentPercentage);
+                if (arrayIndex != -1)
+                {
+                    int recommendedArrayIndex = arrayIndex - currentRelativeIndex;
+                    recommendedArrayIndex = Math.Clamp(recommendedArrayIndex, 0, DpiArray.Length - 1);
+                    recommendedPercentage = DpiArray[recommendedArrayIndex];
+                    RecommendedDpiCache[info.DeviceName] = recommendedPercentage;
+                }
+                else
+                {
+                    recommendedPercentage = currentPercentage; // Fallback
                 }
             }
-            finally
-            {
-                Marshal.FreeHGlobal(ptr);
-            }
 
-            info.CurrentDpi = new DpiInfo { Percentage = currentPercentage, RelativeIndex = currentRelativeIndex };
+            int recommendedIdx = Array.IndexOf(DpiArray, recommendedPercentage);
+            if (recommendedIdx == -1) recommendedIdx = 2; // Fallback to 150%
 
-            // Find current percentage in DpiArray
-            int arrayIndex = Array.IndexOf(DpiArray, currentPercentage);
-            if (arrayIndex == -1) 
+            int currentIdx = Array.IndexOf(DpiArray, currentPercentage);
+            info.CurrentDpi = new DpiInfo
             {
-                // Fallback if odd percentage
+                Percentage = currentPercentage,
+                RelativeIndex = currentIdx != -1 ? currentIdx - recommendedIdx : 0
+            };
+
+            if (currentIdx == -1)
+            {
                 info.AvailableDpis.Add(info.CurrentDpi);
                 return;
             }
 
-            // Calculate recommended index in DpiArray
-            int recommendedArrayIndex = arrayIndex - currentRelativeIndex;
-            
-            // Populate available DPIs (approximate range: recommended - 2 to recommended + 4 depending on screen size, 
-            // but we'll provide standard ones from 100% up to something reasonable)
-            // It's safer to provide from 100% to 300% (or up to what array allows)
+            // Populate available DPIs based on the static recommended index
             for (int i = 0; i < DpiArray.Length; i++)
             {
-                int relIndex = i - recommendedArrayIndex;
-                // Avoid too extreme negative relatives. Min relative is usually -2 or -3. Max is usually 3 or 4.
+                int relIndex = i - recommendedIdx;
+                // Avoid too extreme negative relatives. Min relative is usually -3. Max is usually 4.
                 if (relIndex >= -3 && relIndex <= 4)
                 {
                     info.AvailableDpis.Add(new DpiInfo { Percentage = DpiArray[i], RelativeIndex = relIndex });
