@@ -8,7 +8,7 @@ namespace ScaleSwitcher.Models
     public static class SettingsManager
     {
         private static readonly string ConfigPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ScaleSwitcher",
             "config.json");
 
