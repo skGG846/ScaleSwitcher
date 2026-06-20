@@ -1,0 +1,34 @@
+<Window x:Class="ScaleSwitcher.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ScaleSwitcher Settings" Height="350" Width="300"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="TargetDisplayLabel" Text="Target Display (Left Click):" FontWeight="Bold" Margin="0,0,0,5" Grid.Row="0"/>
+        <ComboBox x:Name="DisplayComboBox" Margin="0,0,0,15" Grid.Row="1" SelectionChanged="DisplayComboBox_SelectionChanged"/>
+
+        <TextBlock x:Name="ScalesLabel" Text="Available Scales for Rotation:" FontWeight="Bold" Margin="0,0,0,5" Grid.Row="2"/>
+        <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto" Margin="0,0,0,15">
+            <ItemsControl x:Name="ScalesItemsControl">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <CheckBox Content="{Binding DisplayText}" 
+                                  IsChecked="{Binding IsSelected}" 
+                                  Margin="0,2"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+        <Button x:Name="SaveButton" Content="Save" Width="80" HorizontalAlignment="Right" Grid.Row="4" Click="SaveButton_Click" Padding="5"/>
+    </Grid>
+</Window>

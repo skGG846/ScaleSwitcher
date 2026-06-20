@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="Menu_Scale" xml:space="preserve"><value>拡大/縮小</value></data>
+  <data name="Menu_Resolution" xml:space="preserve"><value>ディスプレイの解像度</value></data>
+  <data name="Menu_RunAtStartup" xml:space="preserve"><value>Windows起動時に実行</value></data>
+  <data name="Menu_Settings" xml:space="preserve"><value>設定</value></data>
+  <data name="Menu_Exit" xml:space="preserve"><value>終了</value></data>
+  <data name="Settings_Title" xml:space="preserve"><value>ScaleSwitcher 設定</value></data>
+  <data name="Settings_TargetDisplay" xml:space="preserve"><value>ディスプレイ番号 (左クリック対象):</value></data>
+  <data name="Settings_Scales" xml:space="preserve"><value>拡大/縮小率:</value></data>
+  <data name="Settings_Save" xml:space="preserve"><value>保存</value></data>
+  <data name="DisplayPrefix" xml:space="preserve"><value>ディスプレイ</value></data>
+</root>
