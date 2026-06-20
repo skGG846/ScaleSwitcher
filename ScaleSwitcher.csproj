@@ -11,4 +11,10 @@
     <ApplicationIcon>app.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <ItemGroup>
+    <None Update="app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>

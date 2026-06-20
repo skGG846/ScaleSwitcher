@@ -23,10 +23,10 @@ namespace ScaleSwitcher
             Icon? appIcon = null;
             try
             {
-                string? exePath = Environment.ProcessPath;
-                if (!string.IsNullOrEmpty(exePath))
+                string icoPath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app.ico");
+                if (System.IO.File.Exists(icoPath))
                 {
-                    appIcon = Icon.ExtractAssociatedIcon(exePath);
+                    appIcon = new Icon(icoPath);
                 }
             }
             catch
