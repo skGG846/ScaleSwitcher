@@ -137,6 +137,17 @@ namespace ScaleSwitcher.Models
 
         public static bool SetResolution(DisplayInfo info, ResolutionInfo res)
         {
+            var oldPos = System.Windows.Forms.Cursor.Position;
+            var oldScreenObj = System.Windows.Forms.Screen.FromPoint(oldPos);
+            var oldScreen = oldScreenObj.Bounds;
+            int offsetX = oldScreen.Right - oldPos.X;
+            int offsetY = oldScreen.Bottom - oldPos.Y;
+            string deviceName = oldScreenObj.DeviceName;
+
+            string oldResStr = info.CurrentResolution != null ? $"{info.CurrentResolution.Width}x{info.CurrentResolution.Height}" : "";
+            string newResStr = $"{res.Width}x{res.Height}";
+            var osd = ShowOsd($"{oldResStr} → {newResStr}");
+
             var devMode = new NativeMethods.DEVMODE();
             devMode.dmSize = (short)Marshal.SizeOf(typeof(NativeMethods.DEVMODE));
             if (NativeMethods.EnumDisplaySettings(info.DeviceName, NativeMethods.ENUM_CURRENT_SETTINGS, ref devMode))
@@ -146,14 +157,109 @@ namespace ScaleSwitcher.Models
                 devMode.dmFields = 0x00080000 | 0x00100000; // DM_PELSWIDTH | DM_PELSHEIGHT
 
                 int result = NativeMethods.ChangeDisplaySettingsEx(info.DeviceName, ref devMode, IntPtr.Zero, 0, IntPtr.Zero);
-                return result == NativeMethods.DISP_CHANGE_SUCCESSFUL;
+                if (result == NativeMethods.DISP_CHANGE_SUCCESSFUL)
+                {
+                    // 解像度変更ではDPIによるアイコンのピクセルサイズは変わらないため、そのままのオフセットを渡す
+                    RestoreCursorPosition(offsetX, offsetY, deviceName, osd);
+                    return true;
+                }
+            }
+
+            if (osd != null && System.Windows.Application.Current != null)
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() => osd.CloseWithFade());
             }
             return false;
         }
 
         public static bool SetDpi(DisplayInfo info, DpiInfo dpi)
         {
-            return NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETLOGICALDPIOVERRIDE, dpi.RelativeIndex, (IntPtr)info.MonitorIndex, 3);
+            var oldPos = System.Windows.Forms.Cursor.Position;
+            var oldScreenObj = System.Windows.Forms.Screen.FromPoint(oldPos);
+            var oldScreen = oldScreenObj.Bounds;
+            int offsetX = oldScreen.Right - oldPos.X;
+            int offsetY = oldScreen.Bottom - oldPos.Y;
+            string deviceName = oldScreenObj.DeviceName;
+
+            string oldDpiStr = info.CurrentDpi != null ? $"{info.CurrentDpi.Percentage}%" : "";
+            string newDpiStr = $"{dpi.Percentage}%";
+            var osd = ShowOsd($"{oldDpiStr} → {newDpiStr}");
+
+            bool success = NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETLOGICALDPIOVERRIDE, dpi.RelativeIndex, (IntPtr)info.MonitorIndex, 3);
+            if (success)
+            {
+                // スケーリング変更時は、タスクバー等のサイズが変わるためDPIの比率をオフセットにかける
+                double ratio = info.CurrentDpi != null && info.CurrentDpi.Percentage > 0 
+                                ? (double)dpi.Percentage / info.CurrentDpi.Percentage 
+                                : 1.0;
+                int newOffsetX = (int)Math.Round(offsetX * ratio);
+                int newOffsetY = (int)Math.Round(offsetY * ratio);
+                RestoreCursorPosition(newOffsetX, newOffsetY, deviceName, osd);
+            }
+            else
+            {
+                if (osd != null && System.Windows.Application.Current != null)
+                {
+                    System.Windows.Application.Current.Dispatcher.Invoke(() => osd.CloseWithFade());
+                }
+            }
+            return success;
+        }
+
+        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message)
+        {
+            ScaleSwitcher.Views.OsdWindow? osd = null;
+            if (System.Windows.Application.Current != null && System.Windows.Application.Current.Dispatcher != null)
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    osd = new ScaleSwitcher.Views.OsdWindow(message);
+                    
+                    // 仮想スクリーン全体を覆うようにする
+                    var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
+                    
+                    osd.Left = virtualScreen.Left;
+                    osd.Top = virtualScreen.Top;
+                    osd.Width = virtualScreen.Width;
+                    osd.Height = virtualScreen.Height;
+
+                    osd.Show();
+                    
+                    // Cursor="None" を確実に効かせるため、マウスをキャプチャする
+                    osd.CaptureMouse();
+                });
+            }
+            return osd;
+        }
+
+        private static async void RestoreCursorPosition(int offsetX, int offsetY, string deviceName, ScaleSwitcher.Views.OsdWindow? osd)
+        {
+            // OSによる画面レイアウトの再構成とマウスの中央リセット処理が完了するのを少し待つ
+            await System.Threading.Tasks.Task.Delay(1500);
+
+            var screenObj = System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == deviceName) 
+                         ?? System.Windows.Forms.Screen.PrimaryScreen;
+
+            if (screenObj != null)
+            {
+                var newScreen = screenObj.Bounds;
+
+                int newX = newScreen.Right - offsetX;
+                int newY = newScreen.Bottom - offsetY;
+
+                newX = Math.Max(newScreen.Left, Math.Min(newX, newScreen.Right - 1));
+                newY = Math.Max(newScreen.Top, Math.Min(newY, newScreen.Bottom - 1));
+
+                System.Windows.Forms.Cursor.Position = new System.Drawing.Point(newX, newY);
+            }
+
+            if (osd != null && System.Windows.Application.Current != null)
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    osd.CloseWithFade();
+                });
+            }
         }
     }
 }
