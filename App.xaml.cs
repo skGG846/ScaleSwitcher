@@ -14,9 +14,21 @@ namespace ScaleSwitcher
         private Forms.NotifyIcon _notifyIcon = null!;
         private AppSettings _settings = null!;
         private int _currentScaleCycleIndex = 0;
+        private static System.Threading.Mutex? _mutex;
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            const string mutexName = "ScaleSwitcher_Unique_Mutex_Name_2026";
+            _mutex = new System.Threading.Mutex(true, mutexName, out bool createdNew);
+
+            if (!createdNew)
+            {
+                _mutex.Dispose();
+                _mutex = null;
+                Shutdown();
+                return;
+            }
+
             base.OnStartup(e);
 
             ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -207,6 +219,23 @@ namespace ScaleSwitcher
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
             Shutdown();
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            if (_mutex != null)
+            {
+                try
+                {
+                    _mutex.ReleaseMutex();
+                }
+                catch
+                {
+                    // Ignore
+                }
+                _mutex.Dispose();
+            }
+            base.OnExit(e);
         }
     }
 }
