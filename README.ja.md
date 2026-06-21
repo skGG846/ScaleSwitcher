@@ -1,6 +1,10 @@
 # ScaleSwitcher
 
+[English](./README.md)
+
 ScaleSwitcher は、WPF と .NET 10 で作成された、タスクトレイ常駐型の軽量な Windows ディスプレイ設定切り替えツールです。複数のモニターに対して、拡大/縮小率（DPI）や画面解像度をすばやく変更できます。
+
+![ScaleSwitcher demo](./ScaleSwitcher.png)
 
 ## 主な機能
 

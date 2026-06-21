@@ -4,6 +4,8 @@
 
 ScaleSwitcher is a lightweight Windows system tray utility built with WPF and .NET 10. It allows you to quickly change display scaling (DPI) and screen resolutions for multiple monitors.
 
+![ScaleSwitcher demo](./ScaleSwitcher.png)
+
 ## Features
 
 - **Left-Click to Cycle Scaling**: Instantly cycle through predefined scaling factors (e.g., 100% -> 150% -> 100%) on a selected display with a single click.
