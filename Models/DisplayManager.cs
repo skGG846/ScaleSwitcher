@@ -11,6 +11,9 @@ namespace ScaleSwitcher.Models
     public static class DisplayManager
     {
         private static readonly int[] DpiArray = { 100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500 };
+        private static readonly List<ScaleSwitcher.Views.OsdWindow> DisplayInfoOsds = new();
+
+        public static bool DisplayInfoOsdsVisible => DisplayInfoOsds.Count > 0;
 
         public static List<DisplayInfo> GetDisplays()
         {
@@ -397,20 +400,80 @@ namespace ScaleSwitcher.Models
             return success;
         }
 
+        public static void ShowDisplayInfoOsds()
+        {
+            HideDisplayInfoOsds();
+
+            var displays = GetDisplays();
+            foreach (var display in displays)
+            {
+                var osd = ShowOsd(BuildDisplayInfoMessage(display), display, 30, captureMouse: false, hideCursor: false);
+                if (osd != null)
+                {
+                    DisplayInfoOsds.Add(osd);
+                }
+            }
+        }
+
+        public static void HideDisplayInfoOsds()
+        {
+            if (DisplayInfoOsds.Count == 0) return;
+
+            if (System.Windows.Application.Current != null)
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    foreach (var osd in DisplayInfoOsds)
+                    {
+                        osd.CloseWithFade();
+                    }
+                    DisplayInfoOsds.Clear();
+                });
+            }
+            else
+            {
+                DisplayInfoOsds.Clear();
+            }
+        }
+
+        private static string BuildDisplayInfoMessage(DisplayInfo display)
+        {
+            string resolution = display.CurrentResolution != null
+                ? $"{display.CurrentResolution.Width}x{display.CurrentResolution.Height}"
+                : "unknown";
+            string dpi = display.CurrentDpi != null ? $"{display.CurrentDpi.Percentage}%" : "unknown";
+
+            return string.Join(Environment.NewLine,
+                $"Windows settings display: {display.SettingsDisplayNumber}",
+                $"Monitor index: {display.MonitorIndex}",
+                $"Device: {display.DeviceName}",
+                $"Primary: {display.IsPrimary}",
+                $"Resolution: {resolution}",
+                $"Scale: {dpi}");
+        }
+
         private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message, DisplayInfo display)
+        {
+            return ShowOsd(message, display, 48, captureMouse: true, hideCursor: true);
+        }
+
+        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message, DisplayInfo display, double fontSize, bool captureMouse, bool hideCursor)
         {
             ScaleSwitcher.Views.OsdWindow? osd = null;
             if (System.Windows.Application.Current != null && System.Windows.Application.Current.Dispatcher != null)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
-                    osd = new ScaleSwitcher.Views.OsdWindow(message);
+                    osd = new ScaleSwitcher.Views.OsdWindow(message, fontSize, hideCursor);
 
                     osd.Show();
                     PositionOsdOnDisplay(osd, display);
-                    
-                    // Cursor="None" を確実に効かせるため、マウスをキャプチャする
-                    osd.CaptureMouse();
+
+                    if (captureMouse)
+                    {
+                        // Cursor="None" を確実に効かせるため、マウスをキャプチャする
+                        osd.CaptureMouse();
+                    }
                 });
             }
             return osd;

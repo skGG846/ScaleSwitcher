@@ -50,6 +50,12 @@ namespace ScaleSwitcher.Services
             _ => "設定..."
         };
 
+        public string Menu_ShowDisplayInfo => _language switch
+        {
+            UiLanguage.English => "Show display info",
+            _ => "ディスプレイ情報を表示"
+        };
+
         public string Menu_Exit => _language switch
         {
             UiLanguage.English => "Exit",

@@ -241,6 +241,20 @@ namespace ScaleSwitcher
             settingsItem.Click += (s, e) => OpenSettings();
             menu.Items.Add(settingsItem);
 
+            var showDisplayInfoItem = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_ShowDisplayInfo)
+            {
+                CheckOnClick = true,
+                Checked = DisplayManager.DisplayInfoOsdsVisible
+            };
+            showDisplayInfoItem.CheckedChanged += (s, e) =>
+            {
+                if (showDisplayInfoItem.Checked)
+                    DisplayManager.ShowDisplayInfoOsds();
+                else
+                    DisplayManager.HideDisplayInfoOsds();
+            };
+            menu.Items.Add(showDisplayInfoItem);
+
             var exitItem = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Exit);
             exitItem.Click += (s, e) => ExitApp();
             menu.Items.Add(exitItem);

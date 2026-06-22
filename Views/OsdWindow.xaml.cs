@@ -6,10 +6,12 @@ namespace ScaleSwitcher.Views
 {
     public partial class OsdWindow : Window
     {
-        public OsdWindow(string message)
+        public OsdWindow(string message, double fontSize = 48, bool hideCursor = true)
         {
             InitializeComponent();
             MessageText.Text = message;
+            MessageText.FontSize = fontSize;
+            Cursor = hideCursor ? System.Windows.Input.Cursors.None : System.Windows.Input.Cursors.Arrow;
         }
 
         public void CloseWithFade()
