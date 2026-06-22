@@ -1,8 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
+using System.Text;
 
 namespace ScaleSwitcher.Models
 {
@@ -13,9 +14,13 @@ namespace ScaleSwitcher.Models
         public static List<DisplayInfo> GetDisplays()
         {
             var displays = new List<DisplayInfo>();
-            var settingsDisplayNumbers = GetSettingsDisplayNumbers();
+            var diagnostics = new StringBuilder();
+            AppendDiagnosticsHeader(diagnostics);
+            var settingsDisplayNumbers = GetWindowsDisplayNumbers(diagnostics);
             int index = 0;
 
+            diagnostics.AppendLine();
+            diagnostics.AppendLine("[EnumDisplayMonitors]");
             NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData)
             {
                 var mi = new NativeMethods.MONITORINFOEX();
@@ -37,20 +42,28 @@ namespace ScaleSwitcher.Models
                     PopulateDpis(info);
                     
                     displays.Add(info);
+                    diagnostics.AppendLine(
+                        $"index={index}, device={mi.szDevice}, assignedDisplayNumber={info.SettingsDisplayNumber}, isPrimary={info.IsPrimary}, " +
+                        $"monitorRect=({mi.rcMonitor.left},{mi.rcMonitor.top})-({mi.rcMonitor.right},{mi.rcMonitor.bottom}), " +
+                        $"workRect=({mi.rcWork.left},{mi.rcWork.top})-({mi.rcWork.right},{mi.rcWork.bottom})");
                     index++;
                 }
                 return true;
             }, IntPtr.Zero);
 
+            AppendWindowsFormsScreenDiagnostics(diagnostics);
+            WriteDisplayDiagnostics(diagnostics);
+
             return displays;
         }
 
-        private static Dictionary<string, int> GetSettingsDisplayNumbers()
+        private static Dictionary<string, int> GetWindowsDisplayNumbers(StringBuilder diagnostics)
         {
             var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             if (NativeMethods.GetDisplayConfigBufferSizes(NativeMethods.QDC_ONLY_ACTIVE_PATHS, out uint pathCount, out uint modeCount) != 0)
             {
+                diagnostics.AppendLine("GetDisplayConfigBufferSizes failed.");
                 return result;
             }
 
@@ -58,9 +71,26 @@ namespace ScaleSwitcher.Models
             var modes = new NativeMethods.DISPLAYCONFIG_MODE_INFO[modeCount];
             if (NativeMethods.QueryDisplayConfig(NativeMethods.QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
             {
+                diagnostics.AppendLine("QueryDisplayConfig failed.");
                 return result;
             }
 
+            diagnostics.AppendLine("[QueryDisplayConfig]");
+            diagnostics.AppendLine($"pathCount={pathCount}, modeCount={modeCount}");
+            diagnostics.AppendLine("[DISPLAYCONFIG_MODE_INFO]");
+            for (int i = 0; i < modeCount; i++)
+            {
+                diagnostics.AppendLine(
+                    $"modeIndex={i}, infoType={modes[i].infoType}, id={modes[i].id}, " +
+                    $"adapter=({modes[i].adapterId.HighPart},{modes[i].adapterId.LowPart}), " +
+                    $"sourceWidth={modes[i].modeInfo.sourceMode.width}, sourceHeight={modes[i].modeInfo.sourceMode.height}, " +
+                    $"sourcePixelFormat={modes[i].modeInfo.sourceMode.pixelFormat}, " +
+                    $"sourcePosition=({modes[i].modeInfo.sourceMode.position.x},{modes[i].modeInfo.sourceMode.position.y}), " +
+                    $"targetActiveSize={modes[i].modeInfo.targetMode.targetVideoSignalInfo.activeSize.cx}x{modes[i].modeInfo.targetMode.targetVideoSignalInfo.activeSize.cy}, " +
+                    $"targetTotalSize={modes[i].modeInfo.targetMode.targetVideoSignalInfo.totalSize.cx}x{modes[i].modeInfo.targetMode.targetVideoSignalInfo.totalSize.cy}");
+            }
+
+            diagnostics.AppendLine("[DISPLAYCONFIG_PATH_INFO]");
             for (int i = 0; i < pathCount; i++)
             {
                 var sourceName = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
@@ -75,17 +105,98 @@ namespace ScaleSwitcher.Models
                     viewGdiDeviceName = new string('\0', 32)
                 };
 
+                string sourceDeviceName = "";
                 if (NativeMethods.DisplayConfigGetDeviceInfo(ref sourceName) == 0)
                 {
-                    string sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
+                    sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
                     if (!string.IsNullOrWhiteSpace(sourceDeviceName))
                     {
-                        result.TryAdd(sourceDeviceName, i + 1);
+                        result.TryAdd(sourceDeviceName, (int)paths[i].sourceInfo.id + 1);
                     }
                 }
+
+                var targetName = new NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME
+                {
+                    header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
+                    {
+                        type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                        size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME>(),
+                        adapterId = paths[i].targetInfo.adapterId,
+                        id = paths[i].targetInfo.id
+                    },
+                    monitorFriendlyDeviceName = new string('\0', 64),
+                    monitorDevicePath = new string('\0', 128)
+                };
+
+                string targetFriendlyName = "";
+                string targetDevicePath = "";
+                uint targetNameFlags = 0;
+                uint connectorInstance = 0;
+                ushort edidManufactureId = 0;
+                ushort edidProductCodeId = 0;
+                int targetNameResult = NativeMethods.DisplayConfigGetDeviceInfo(ref targetName);
+                if (targetNameResult == 0)
+                {
+                    targetFriendlyName = targetName.monitorFriendlyDeviceName.TrimEnd('\0');
+                    targetDevicePath = targetName.monitorDevicePath.TrimEnd('\0');
+                    targetNameFlags = targetName.flags;
+                    connectorInstance = targetName.connectorInstance;
+                    edidManufactureId = targetName.edidManufactureId;
+                    edidProductCodeId = targetName.edidProductCodeId;
+                }
+
+                diagnostics.AppendLine(
+                    $"pathIndex={i}, sourceAdapter=({paths[i].sourceInfo.adapterId.HighPart},{paths[i].sourceInfo.adapterId.LowPart}), " +
+                    $"sourceId={paths[i].sourceInfo.id}, sourceModeInfoIdx={paths[i].sourceInfo.modeInfoIdx}, sourceStatusFlags=0x{paths[i].sourceInfo.statusFlags:X8}, " +
+                    $"gdiDevice={sourceDeviceName}, pathOrderDisplayNumber={i + 1}, sourceIdDisplayNumber={(int)paths[i].sourceInfo.id + 1}, " +
+                    $"targetAdapter=({paths[i].targetInfo.adapterId.HighPart},{paths[i].targetInfo.adapterId.LowPart}), targetId={paths[i].targetInfo.id}, " +
+                    $"targetIdDisplayNumber={(int)paths[i].targetInfo.id + 1}, " +
+                    $"targetModeInfoIdx={paths[i].targetInfo.modeInfoIdx}, outputTechnology={paths[i].targetInfo.outputTechnology}, rotation={paths[i].targetInfo.rotation}, " +
+                    $"scaling={paths[i].targetInfo.scaling}, refresh={paths[i].targetInfo.refreshRate.Numerator}/{paths[i].targetInfo.refreshRate.Denominator}, " +
+                    $"scanLineOrdering={paths[i].targetInfo.scanLineOrdering}, targetAvailable={paths[i].targetInfo.targetAvailable}, " +
+                    $"targetStatusFlags=0x{paths[i].targetInfo.statusFlags:X8}, pathFlags=0x{paths[i].flags:X8}, " +
+                    $"targetNameResult={targetNameResult}, targetNameFlags=0x{targetNameFlags:X8}, connectorInstance={connectorInstance}, " +
+                    $"edidManufactureId=0x{edidManufactureId:X4}, edidProductCodeId=0x{edidProductCodeId:X4}, " +
+                    $"monitorFriendlyName={targetFriendlyName}, monitorDevicePath={targetDevicePath}");
             }
 
             return result;
+        }
+
+        private static void AppendDiagnosticsHeader(StringBuilder diagnostics)
+        {
+            diagnostics.AppendLine("ScaleSwitcher display diagnostics");
+            diagnostics.AppendLine($"timestamp={DateTimeOffset.Now:O}");
+            diagnostics.AppendLine($"baseDirectory={AppContext.BaseDirectory}");
+            diagnostics.AppendLine($"machineName={Environment.MachineName}");
+            diagnostics.AppendLine($"osVersion={Environment.OSVersion}");
+        }
+
+        private static void AppendWindowsFormsScreenDiagnostics(StringBuilder diagnostics)
+        {
+            diagnostics.AppendLine();
+            diagnostics.AppendLine("[System.Windows.Forms.Screen]");
+            foreach (var screen in System.Windows.Forms.Screen.AllScreens)
+            {
+                diagnostics.AppendLine(
+                    $"device={screen.DeviceName}, primary={screen.Primary}, " +
+                    $"bounds=({screen.Bounds.Left},{screen.Bounds.Top})-({screen.Bounds.Right},{screen.Bounds.Bottom}), " +
+                    $"workingArea=({screen.WorkingArea.Left},{screen.WorkingArea.Top})-({screen.WorkingArea.Right},{screen.WorkingArea.Bottom}), " +
+                    $"bitsPerPixel={screen.BitsPerPixel}");
+            }
+        }
+
+        private static void WriteDisplayDiagnostics(StringBuilder diagnostics)
+        {
+            try
+            {
+                string path = Path.Combine(AppContext.BaseDirectory, "ScaleSwitcher.DisplayDiagnostics.log");
+                File.WriteAllText(path, diagnostics.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+                // Diagnostics must not prevent display enumeration.
+            }
         }
 
         private static void PopulateResolutions(DisplayInfo info)

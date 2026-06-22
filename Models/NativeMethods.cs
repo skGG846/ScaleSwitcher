@@ -11,6 +11,7 @@ namespace ScaleSwitcher.Models
         public const int DISP_CHANGE_SUCCESSFUL = 0;
         public const uint QDC_ONLY_ACTIVE_PATHS = 0x00000002;
         public const uint DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1;
+        public const uint DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2;
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool SystemParametersInfo(uint uiAction, int uiParam, IntPtr pvParam, uint fWinIni);
@@ -45,6 +46,9 @@ namespace ScaleSwitcher.Models
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_SOURCE_DEVICE_NAME requestPacket);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, EntryPoint = "DisplayConfigGetDeviceInfo")]
+        public static extern int DisplayConfigGetDeviceInfo(ref DISPLAYCONFIG_TARGET_DEVICE_NAME requestPacket);
 
         [StructLayout(LayoutKind.Sequential)]
         public struct Rect
@@ -186,6 +190,21 @@ namespace ScaleSwitcher.Models
             public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
             public string viewGdiDeviceName;
+        }
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        public struct DISPLAYCONFIG_TARGET_DEVICE_NAME
+        {
+            public DISPLAYCONFIG_DEVICE_INFO_HEADER header;
+            public uint flags;
+            public uint outputTechnology;
+            public ushort edidManufactureId;
+            public ushort edidProductCodeId;
+            public uint connectorInstance;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)]
+            public string monitorFriendlyDeviceName;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+            public string monitorDevicePath;
         }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
