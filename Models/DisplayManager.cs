@@ -13,6 +13,7 @@ namespace ScaleSwitcher.Models
         public static List<DisplayInfo> GetDisplays()
         {
             var displays = new List<DisplayInfo>();
+            var settingsDisplayNumbers = GetSettingsDisplayNumbers();
             int index = 0;
 
             NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData)
@@ -24,7 +25,9 @@ namespace ScaleSwitcher.Models
                     var info = new DisplayInfo
                     {
                         MonitorIndex = index,
-                        SettingsDisplayNumber = GetSettingsDisplayNumber(mi.szDevice, index),
+                        SettingsDisplayNumber = settingsDisplayNumbers.TryGetValue(mi.szDevice, out int settingsDisplayNumber)
+                            ? settingsDisplayNumber
+                            : index + 1,
                         MonitorHandle = hMonitor,
                         DeviceName = mi.szDevice,
                         IsPrimary = (mi.dwFlags & 1) != 0 // MONITORINFOF_PRIMARY
@@ -42,19 +45,47 @@ namespace ScaleSwitcher.Models
             return displays;
         }
 
-        private static int GetSettingsDisplayNumber(string deviceName, int fallbackIndex)
+        private static Dictionary<string, int> GetSettingsDisplayNumbers()
         {
-            // Windows Settings labels displays using the numeric suffix from the
-            // GDI device name (for example, "\\.\DISPLAY2" is shown as Display 2).
-            // EnumDisplayMonitors can return monitors in a different order, so do
-            // not derive the user-visible display number from the enumeration index.
-            var match = Regex.Match(deviceName, @"DISPLAY(?<number>\d+)$", RegexOptions.IgnoreCase);
-            if (match.Success && int.TryParse(match.Groups["number"].Value, out int displayNumber))
+            var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+            if (NativeMethods.GetDisplayConfigBufferSizes(NativeMethods.QDC_ONLY_ACTIVE_PATHS, out uint pathCount, out uint modeCount) != 0)
             {
-                return displayNumber;
+                return result;
             }
 
-            return fallbackIndex + 1;
+            var paths = new NativeMethods.DISPLAYCONFIG_PATH_INFO[pathCount];
+            var modes = new NativeMethods.DISPLAYCONFIG_MODE_INFO[modeCount];
+            if (NativeMethods.QueryDisplayConfig(NativeMethods.QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
+            {
+                return result;
+            }
+
+            for (int i = 0; i < pathCount; i++)
+            {
+                var sourceName = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
+                {
+                    header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
+                    {
+                        type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                        size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
+                        adapterId = paths[i].sourceInfo.adapterId,
+                        id = paths[i].sourceInfo.id
+                    },
+                    viewGdiDeviceName = new string('\0', 32)
+                };
+
+                if (NativeMethods.DisplayConfigGetDeviceInfo(ref sourceName) == 0)
+                {
+                    string sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
+                    if (!string.IsNullOrWhiteSpace(sourceDeviceName))
+                    {
+                        result.TryAdd(sourceDeviceName, i + 1);
+                    }
+                }
+            }
+
+            return result;
         }
 
         private static void PopulateResolutions(DisplayInfo info)
