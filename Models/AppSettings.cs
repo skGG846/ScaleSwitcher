@@ -22,6 +22,6 @@ namespace ScaleSwitcher.Models
     {
         public int TargetMonitorIndex { get; set; } = 0;
         public List<int> ActiveDpiPercentages { get; set; } = new() { 100, 200 };
-        public string DisplayNumberSource { get; set; } = DisplayNumberSources.SourceId;
+        public string DisplayNumberSource { get; set; } = DisplayNumberSources.TargetId;
     }
 }

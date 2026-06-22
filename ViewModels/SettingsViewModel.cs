@@ -137,7 +137,7 @@ namespace ScaleSwitcher.ViewModels
             }
 
             SelectedDisplayNumberSource = DisplayNumberSources.FirstOrDefault(o => o.Value == _settings.DisplayNumberSource)
-                                          ?? DisplayNumberSources.First(o => o.Value == ScaleSwitcher.Models.DisplayNumberSources.SourceId);
+                                          ?? DisplayNumberSources.First(o => o.Value == ScaleSwitcher.Models.DisplayNumberSources.TargetId);
         }
 
         private static List<DisplayNumberSourceOptionViewModel> CreateDisplayNumberSourceOptions()

@@ -19,9 +19,10 @@ namespace ScaleSwitcher.Models
         {
             var displays = new List<DisplayInfo>();
             var settings = SettingsManager.Load();
+            const string effectiveDisplayNumberSource = DisplayNumberSources.TargetId;
             var diagnostics = new StringBuilder();
-            AppendDiagnosticsHeader(diagnostics, settings.DisplayNumberSource);
-            var settingsDisplayNumbers = GetWindowsDisplayNumbers(diagnostics, settings.DisplayNumberSource);
+            AppendDiagnosticsHeader(diagnostics, settings.DisplayNumberSource, effectiveDisplayNumberSource);
+            var settingsDisplayNumbers = GetWindowsDisplayNumbers(diagnostics, effectiveDisplayNumberSource);
             int index = 0;
 
             diagnostics.AppendLine();
@@ -197,14 +198,16 @@ namespace ScaleSwitcher.Models
                 : null;
         }
 
-        private static void AppendDiagnosticsHeader(StringBuilder diagnostics, string displayNumberSource)
+        private static void AppendDiagnosticsHeader(StringBuilder diagnostics, string configuredDisplayNumberSource, string effectiveDisplayNumberSource)
         {
             diagnostics.AppendLine("ScaleSwitcher display diagnostics");
             diagnostics.AppendLine($"timestamp={DateTimeOffset.Now:O}");
             diagnostics.AppendLine($"baseDirectory={AppContext.BaseDirectory}");
             diagnostics.AppendLine($"machineName={Environment.MachineName}");
             diagnostics.AppendLine($"osVersion={Environment.OSVersion}");
-            diagnostics.AppendLine($"displayNumberSource={displayNumberSource}");
+            diagnostics.AppendLine($"configuredDisplayNumberSource={configuredDisplayNumberSource}");
+            diagnostics.AppendLine($"effectiveDisplayNumberSource={effectiveDisplayNumberSource}");
+            diagnostics.AppendLine("effectiveDisplayNumberFormula=DISPLAYCONFIG_PATH_INFO.targetInfo.id + 1");
         }
 
         private static void AppendWindowsFormsScreenDiagnostics(StringBuilder diagnostics)
