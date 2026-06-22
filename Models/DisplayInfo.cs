@@ -24,6 +24,7 @@ namespace ScaleSwitcher.Models
     public class DisplayInfo
     {
         public int MonitorIndex { get; set; }
+        public int SettingsDisplayNumber { get; set; }
         public IntPtr MonitorHandle { get; set; }
         public string DeviceName { get; set; } = "";
         public bool IsPrimary { get; set; }

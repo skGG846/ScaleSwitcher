@@ -54,7 +54,7 @@ namespace ScaleSwitcher.ViewModels
             Display = display;
             Index = index;
             
-            string name = $"{AppLocalization.Instance.DisplayPrefix} {index + 1}";
+            string name = $"{AppLocalization.Instance.DisplayPrefix} {display.SettingsDisplayNumber}";
             if (display.IsPrimary) name += " (Primary)";
             DisplayName = name;
         }

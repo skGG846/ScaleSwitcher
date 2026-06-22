@@ -187,7 +187,7 @@ namespace ScaleSwitcher
                 for (int i = 0; i < displays.Count; i++)
                 {
                     var display = displays[i];
-                    string displayName = $"{AppLocalization.Instance.DisplayPrefix} {i + 1}";
+                    string displayName = $"{AppLocalization.Instance.DisplayPrefix} {display.SettingsDisplayNumber}";
                     if (display.IsPrimary) displayName += " (Primary)";
 
                     var displayMenu = new Forms.ToolStripMenuItem(displayName);
