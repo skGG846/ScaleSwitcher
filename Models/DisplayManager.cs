@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Windows.Interop;
 
 namespace ScaleSwitcher.Models
 {
@@ -14,9 +15,10 @@ namespace ScaleSwitcher.Models
         public static List<DisplayInfo> GetDisplays()
         {
             var displays = new List<DisplayInfo>();
+            var settings = SettingsManager.Load();
             var diagnostics = new StringBuilder();
-            AppendDiagnosticsHeader(diagnostics);
-            var settingsDisplayNumbers = GetWindowsDisplayNumbers(diagnostics);
+            AppendDiagnosticsHeader(diagnostics, settings.DisplayNumberSource);
+            var settingsDisplayNumbers = GetWindowsDisplayNumbers(diagnostics, settings.DisplayNumberSource);
             int index = 0;
 
             diagnostics.AppendLine();
@@ -57,7 +59,7 @@ namespace ScaleSwitcher.Models
             return displays;
         }
 
-        private static Dictionary<string, int> GetWindowsDisplayNumbers(StringBuilder diagnostics)
+        private static Dictionary<string, int> GetWindowsDisplayNumbers(StringBuilder diagnostics, string displayNumberSource)
         {
             var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
@@ -106,12 +108,16 @@ namespace ScaleSwitcher.Models
                 };
 
                 string sourceDeviceName = "";
+                int? gdiDeviceDisplayNumber = null;
+                int selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, i, paths[i], sourceDeviceName);
                 if (NativeMethods.DisplayConfigGetDeviceInfo(ref sourceName) == 0)
                 {
                     sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
+                    gdiDeviceDisplayNumber = TryGetGdiDeviceNumber(sourceDeviceName);
+                    selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, i, paths[i], sourceDeviceName);
                     if (!string.IsNullOrWhiteSpace(sourceDeviceName))
                     {
-                        result.TryAdd(sourceDeviceName, (int)paths[i].sourceInfo.id + 1);
+                        result.TryAdd(sourceDeviceName, selectedDisplayNumber);
                     }
                 }
 
@@ -149,8 +155,9 @@ namespace ScaleSwitcher.Models
                     $"pathIndex={i}, sourceAdapter=({paths[i].sourceInfo.adapterId.HighPart},{paths[i].sourceInfo.adapterId.LowPart}), " +
                     $"sourceId={paths[i].sourceInfo.id}, sourceModeInfoIdx={paths[i].sourceInfo.modeInfoIdx}, sourceStatusFlags=0x{paths[i].sourceInfo.statusFlags:X8}, " +
                     $"gdiDevice={sourceDeviceName}, pathOrderDisplayNumber={i + 1}, sourceIdDisplayNumber={(int)paths[i].sourceInfo.id + 1}, " +
+                    $"targetIdDisplayNumber={(int)paths[i].targetInfo.id + 1}, gdiDeviceDisplayNumber={gdiDeviceDisplayNumber?.ToString() ?? ""}, " +
+                    $"selectedDisplayNumber={selectedDisplayNumber}, " +
                     $"targetAdapter=({paths[i].targetInfo.adapterId.HighPart},{paths[i].targetInfo.adapterId.LowPart}), targetId={paths[i].targetInfo.id}, " +
-                    $"targetIdDisplayNumber={(int)paths[i].targetInfo.id + 1}, " +
                     $"targetModeInfoIdx={paths[i].targetInfo.modeInfoIdx}, outputTechnology={paths[i].targetInfo.outputTechnology}, rotation={paths[i].targetInfo.rotation}, " +
                     $"scaling={paths[i].targetInfo.scaling}, refresh={paths[i].targetInfo.refreshRate.Numerator}/{paths[i].targetInfo.refreshRate.Denominator}, " +
                     $"scanLineOrdering={paths[i].targetInfo.scanLineOrdering}, targetAvailable={paths[i].targetInfo.targetAvailable}, " +
@@ -163,13 +170,38 @@ namespace ScaleSwitcher.Models
             return result;
         }
 
-        private static void AppendDiagnosticsHeader(StringBuilder diagnostics)
+        private static int ResolveDisplayNumber(string displayNumberSource, int pathIndex, NativeMethods.DISPLAYCONFIG_PATH_INFO path, string sourceDeviceName)
+        {
+            return displayNumberSource switch
+            {
+                DisplayNumberSources.PathOrder => pathIndex + 1,
+                DisplayNumberSources.TargetId => (int)path.targetInfo.id + 1,
+                DisplayNumberSources.GdiDeviceName => TryGetGdiDeviceNumber(sourceDeviceName) ?? pathIndex + 1,
+                _ => (int)path.sourceInfo.id + 1
+            };
+        }
+
+        private static int? TryGetGdiDeviceNumber(string sourceDeviceName)
+        {
+            const string prefix = @"\\.\DISPLAY";
+            if (!sourceDeviceName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return int.TryParse(sourceDeviceName[prefix.Length..], out int displayNumber)
+                ? displayNumber
+                : null;
+        }
+
+        private static void AppendDiagnosticsHeader(StringBuilder diagnostics, string displayNumberSource)
         {
             diagnostics.AppendLine("ScaleSwitcher display diagnostics");
             diagnostics.AppendLine($"timestamp={DateTimeOffset.Now:O}");
             diagnostics.AppendLine($"baseDirectory={AppContext.BaseDirectory}");
             diagnostics.AppendLine($"machineName={Environment.MachineName}");
             diagnostics.AppendLine($"osVersion={Environment.OSVersion}");
+            diagnostics.AppendLine($"displayNumberSource={displayNumberSource}");
         }
 
         private static void AppendWindowsFormsScreenDiagnostics(StringBuilder diagnostics)
@@ -305,7 +337,7 @@ namespace ScaleSwitcher.Models
 
             string oldResStr = info.CurrentResolution != null ? $"{info.CurrentResolution.Width}x{info.CurrentResolution.Height}" : "";
             string newResStr = $"{res.Width}x{res.Height}";
-            var osd = ShowOsd($"{oldResStr} → {newResStr}");
+            var osd = ShowOsd($"{oldResStr} → {newResStr}", info);
 
             var devMode = new NativeMethods.DEVMODE();
             devMode.dmSize = (short)Marshal.SizeOf(typeof(NativeMethods.DEVMODE));
@@ -342,7 +374,7 @@ namespace ScaleSwitcher.Models
 
             string oldDpiStr = info.CurrentDpi != null ? $"{info.CurrentDpi.Percentage}%" : "";
             string newDpiStr = $"{dpi.Percentage}%";
-            var osd = ShowOsd($"{oldDpiStr} → {newDpiStr}");
+            var osd = ShowOsd($"{oldDpiStr} → {newDpiStr}", info);
 
             bool success = NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETLOGICALDPIOVERRIDE, dpi.RelativeIndex, (IntPtr)info.MonitorIndex, 3);
             if (success)
@@ -365,7 +397,7 @@ namespace ScaleSwitcher.Models
             return success;
         }
 
-        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message)
+        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message, DisplayInfo display)
         {
             ScaleSwitcher.Views.OsdWindow? osd = null;
             if (System.Windows.Application.Current != null && System.Windows.Application.Current.Dispatcher != null)
@@ -373,22 +405,53 @@ namespace ScaleSwitcher.Models
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
                     osd = new ScaleSwitcher.Views.OsdWindow(message);
-                    
-                    // 仮想スクリーン全体を覆うようにする
-                    var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
-                    
-                    osd.Left = virtualScreen.Left;
-                    osd.Top = virtualScreen.Top;
-                    osd.Width = virtualScreen.Width;
-                    osd.Height = virtualScreen.Height;
 
                     osd.Show();
+                    PositionOsdOnDisplay(osd, display);
                     
                     // Cursor="None" を確実に効かせるため、マウスをキャプチャする
                     osd.CaptureMouse();
                 });
             }
             return osd;
+        }
+
+        private static void PositionOsdOnDisplay(ScaleSwitcher.Views.OsdWindow osd, DisplayInfo display)
+        {
+            var mi = new NativeMethods.MONITORINFOEX();
+            mi.cbSize = Marshal.SizeOf(typeof(NativeMethods.MONITORINFOEX));
+
+            NativeMethods.Rect rect;
+            if (NativeMethods.GetMonitorInfo(display.MonitorHandle, ref mi))
+            {
+                rect = mi.rcMonitor;
+            }
+            else
+            {
+                var screen = System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == display.DeviceName)
+                             ?? System.Windows.Forms.Screen.PrimaryScreen;
+                if (screen == null) return;
+
+                rect = new NativeMethods.Rect
+                {
+                    left = screen.Bounds.Left,
+                    top = screen.Bounds.Top,
+                    right = screen.Bounds.Right,
+                    bottom = screen.Bounds.Bottom
+                };
+            }
+
+            var hwnd = new WindowInteropHelper(osd).Handle;
+            if (hwnd == IntPtr.Zero) return;
+
+            NativeMethods.SetWindowPos(
+                hwnd,
+                NativeMethods.HWND_TOPMOST,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                NativeMethods.SWP_NOACTIVATE);
         }
 
         private static async void RestoreCursorPosition(int offsetX, int offsetY, string deviceName, ScaleSwitcher.Views.OsdWindow? osd)

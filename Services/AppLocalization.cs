@@ -74,6 +74,36 @@ namespace ScaleSwitcher.Services
             _ => "ローテーションに含めるスケーリング:"
         };
 
+        public string Settings_DisplayNumberSource => _language switch
+        {
+            UiLanguage.English => "Display Number Source:",
+            _ => "ディスプレイ番号の取得元:"
+        };
+
+        public string DisplayNumberSource_PathOrder => _language switch
+        {
+            UiLanguage.English => "pathOrderDisplayNumber",
+            _ => "pathOrderDisplayNumber"
+        };
+
+        public string DisplayNumberSource_SourceId => _language switch
+        {
+            UiLanguage.English => "sourceIdDisplayNumber",
+            _ => "sourceIdDisplayNumber"
+        };
+
+        public string DisplayNumberSource_TargetId => _language switch
+        {
+            UiLanguage.English => "targetIdDisplayNumber",
+            _ => "targetIdDisplayNumber"
+        };
+
+        public string DisplayNumberSource_GdiDeviceName => _language switch
+        {
+            UiLanguage.English => "gdiDeviceDisplayNumber",
+            _ => "gdiDeviceDisplayNumber"
+        };
+
         public string Settings_Save => _language switch
         {
             UiLanguage.English => "Save",

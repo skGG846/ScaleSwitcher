@@ -12,6 +12,8 @@ namespace ScaleSwitcher.Models
         public const uint QDC_ONLY_ACTIVE_PATHS = 0x00000002;
         public const uint DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME = 1;
         public const uint DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2;
+        public static readonly IntPtr HWND_TOPMOST = new(-1);
+        public const uint SWP_NOACTIVATE = 0x0010;
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool SystemParametersInfo(uint uiAction, int uiParam, IntPtr pvParam, uint fWinIni);
@@ -31,6 +33,9 @@ namespace ScaleSwitcher.Models
 
         [DllImport("shcore.dll")]
         public static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
         [DllImport("user32.dll")]
         public static extern int GetDisplayConfigBufferSizes(uint flags, out uint numPathArrayElements, out uint numModeInfoArrayElements);
