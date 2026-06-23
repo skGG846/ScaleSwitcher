@@ -1,21 +1,32 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
+using System.Text;
+using System.Windows.Interop;
 
 namespace ScaleSwitcher.Models
 {
     public static class DisplayManager
     {
         private static readonly int[] DpiArray = { 100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500 };
+        private static readonly List<ScaleSwitcher.Views.OsdWindow> DisplayInfoOsds = new();
+
+        public static bool DisplayInfoOsdsVisible => DisplayInfoOsds.Count > 0;
 
         public static List<DisplayInfo> GetDisplays()
         {
             var displays = new List<DisplayInfo>();
-            var settingsDisplayNumbers = GetSettingsDisplayNumbers();
+            var settings = SettingsManager.Load();
+            const string effectiveDisplayNumberSource = DisplayNumberSources.TargetId;
+            var diagnostics = new StringBuilder();
+            AppendDiagnosticsHeader(diagnostics, settings.DisplayNumberSource, effectiveDisplayNumberSource);
+            var settingsDisplayNumbers = GetWindowsDisplayNumbers(diagnostics, effectiveDisplayNumberSource);
             int index = 0;
 
+            diagnostics.AppendLine();
+            diagnostics.AppendLine("[EnumDisplayMonitors]");
             NativeMethods.EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate (IntPtr hMonitor, IntPtr hdcMonitor, ref NativeMethods.Rect lprcMonitor, IntPtr dwData)
             {
                 var mi = new NativeMethods.MONITORINFOEX();
@@ -37,20 +48,28 @@ namespace ScaleSwitcher.Models
                     PopulateDpis(info);
                     
                     displays.Add(info);
+                    diagnostics.AppendLine(
+                        $"index={index}, device={mi.szDevice}, assignedDisplayNumber={info.SettingsDisplayNumber}, isPrimary={info.IsPrimary}, " +
+                        $"monitorRect=({mi.rcMonitor.left},{mi.rcMonitor.top})-({mi.rcMonitor.right},{mi.rcMonitor.bottom}), " +
+                        $"workRect=({mi.rcWork.left},{mi.rcWork.top})-({mi.rcWork.right},{mi.rcWork.bottom})");
                     index++;
                 }
                 return true;
             }, IntPtr.Zero);
 
+            AppendWindowsFormsScreenDiagnostics(diagnostics);
+            WriteDisplayDiagnostics(diagnostics);
+
             return displays;
         }
 
-        private static Dictionary<string, int> GetSettingsDisplayNumbers()
+        private static Dictionary<string, int> GetWindowsDisplayNumbers(StringBuilder diagnostics, string displayNumberSource)
         {
             var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
             if (NativeMethods.GetDisplayConfigBufferSizes(NativeMethods.QDC_ONLY_ACTIVE_PATHS, out uint pathCount, out uint modeCount) != 0)
             {
+                diagnostics.AppendLine("GetDisplayConfigBufferSizes failed.");
                 return result;
             }
 
@@ -58,9 +77,26 @@ namespace ScaleSwitcher.Models
             var modes = new NativeMethods.DISPLAYCONFIG_MODE_INFO[modeCount];
             if (NativeMethods.QueryDisplayConfig(NativeMethods.QDC_ONLY_ACTIVE_PATHS, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero) != 0)
             {
+                diagnostics.AppendLine("QueryDisplayConfig failed.");
                 return result;
             }
 
+            diagnostics.AppendLine("[QueryDisplayConfig]");
+            diagnostics.AppendLine($"pathCount={pathCount}, modeCount={modeCount}");
+            diagnostics.AppendLine("[DISPLAYCONFIG_MODE_INFO]");
+            for (int i = 0; i < modeCount; i++)
+            {
+                diagnostics.AppendLine(
+                    $"modeIndex={i}, infoType={modes[i].infoType}, id={modes[i].id}, " +
+                    $"adapter=({modes[i].adapterId.HighPart},{modes[i].adapterId.LowPart}), " +
+                    $"sourceWidth={modes[i].modeInfo.sourceMode.width}, sourceHeight={modes[i].modeInfo.sourceMode.height}, " +
+                    $"sourcePixelFormat={modes[i].modeInfo.sourceMode.pixelFormat}, " +
+                    $"sourcePosition=({modes[i].modeInfo.sourceMode.position.x},{modes[i].modeInfo.sourceMode.position.y}), " +
+                    $"targetActiveSize={modes[i].modeInfo.targetMode.targetVideoSignalInfo.activeSize.cx}x{modes[i].modeInfo.targetMode.targetVideoSignalInfo.activeSize.cy}, " +
+                    $"targetTotalSize={modes[i].modeInfo.targetMode.targetVideoSignalInfo.totalSize.cx}x{modes[i].modeInfo.targetMode.targetVideoSignalInfo.totalSize.cy}");
+            }
+
+            diagnostics.AppendLine("[DISPLAYCONFIG_PATH_INFO]");
             for (int i = 0; i < pathCount; i++)
             {
                 var sourceName = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
@@ -75,17 +111,130 @@ namespace ScaleSwitcher.Models
                     viewGdiDeviceName = new string('\0', 32)
                 };
 
+                string sourceDeviceName = "";
+                int? gdiDeviceDisplayNumber = null;
+                int selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, i, paths[i], sourceDeviceName);
                 if (NativeMethods.DisplayConfigGetDeviceInfo(ref sourceName) == 0)
                 {
-                    string sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
+                    sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
+                    gdiDeviceDisplayNumber = TryGetGdiDeviceNumber(sourceDeviceName);
+                    selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, i, paths[i], sourceDeviceName);
                     if (!string.IsNullOrWhiteSpace(sourceDeviceName))
                     {
-                        result.TryAdd(sourceDeviceName, i + 1);
+                        result.TryAdd(sourceDeviceName, selectedDisplayNumber);
                     }
                 }
+
+                var targetName = new NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME
+                {
+                    header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
+                    {
+                        type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                        size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME>(),
+                        adapterId = paths[i].targetInfo.adapterId,
+                        id = paths[i].targetInfo.id
+                    },
+                    monitorFriendlyDeviceName = new string('\0', 64),
+                    monitorDevicePath = new string('\0', 128)
+                };
+
+                string targetFriendlyName = "";
+                string targetDevicePath = "";
+                uint targetNameFlags = 0;
+                uint connectorInstance = 0;
+                ushort edidManufactureId = 0;
+                ushort edidProductCodeId = 0;
+                int targetNameResult = NativeMethods.DisplayConfigGetDeviceInfo(ref targetName);
+                if (targetNameResult == 0)
+                {
+                    targetFriendlyName = targetName.monitorFriendlyDeviceName.TrimEnd('\0');
+                    targetDevicePath = targetName.monitorDevicePath.TrimEnd('\0');
+                    targetNameFlags = targetName.flags;
+                    connectorInstance = targetName.connectorInstance;
+                    edidManufactureId = targetName.edidManufactureId;
+                    edidProductCodeId = targetName.edidProductCodeId;
+                }
+
+                diagnostics.AppendLine(
+                    $"pathIndex={i}, sourceAdapter=({paths[i].sourceInfo.adapterId.HighPart},{paths[i].sourceInfo.adapterId.LowPart}), " +
+                    $"sourceId={paths[i].sourceInfo.id}, sourceModeInfoIdx={paths[i].sourceInfo.modeInfoIdx}, sourceStatusFlags=0x{paths[i].sourceInfo.statusFlags:X8}, " +
+                    $"gdiDevice={sourceDeviceName}, pathOrderDisplayNumber={i + 1}, sourceIdDisplayNumber={(int)paths[i].sourceInfo.id + 1}, " +
+                    $"targetIdDisplayNumber={(int)paths[i].targetInfo.id + 1}, gdiDeviceDisplayNumber={gdiDeviceDisplayNumber?.ToString() ?? ""}, " +
+                    $"selectedDisplayNumber={selectedDisplayNumber}, " +
+                    $"targetAdapter=({paths[i].targetInfo.adapterId.HighPart},{paths[i].targetInfo.adapterId.LowPart}), targetId={paths[i].targetInfo.id}, " +
+                    $"targetModeInfoIdx={paths[i].targetInfo.modeInfoIdx}, outputTechnology={paths[i].targetInfo.outputTechnology}, rotation={paths[i].targetInfo.rotation}, " +
+                    $"scaling={paths[i].targetInfo.scaling}, refresh={paths[i].targetInfo.refreshRate.Numerator}/{paths[i].targetInfo.refreshRate.Denominator}, " +
+                    $"scanLineOrdering={paths[i].targetInfo.scanLineOrdering}, targetAvailable={paths[i].targetInfo.targetAvailable}, " +
+                    $"targetStatusFlags=0x{paths[i].targetInfo.statusFlags:X8}, pathFlags=0x{paths[i].flags:X8}, " +
+                    $"targetNameResult={targetNameResult}, targetNameFlags=0x{targetNameFlags:X8}, connectorInstance={connectorInstance}, " +
+                    $"edidManufactureId=0x{edidManufactureId:X4}, edidProductCodeId=0x{edidProductCodeId:X4}, " +
+                    $"monitorFriendlyName={targetFriendlyName}, monitorDevicePath={targetDevicePath}");
             }
 
             return result;
+        }
+
+        private static int ResolveDisplayNumber(string displayNumberSource, int pathIndex, NativeMethods.DISPLAYCONFIG_PATH_INFO path, string sourceDeviceName)
+        {
+            return displayNumberSource switch
+            {
+                DisplayNumberSources.PathOrder => pathIndex + 1,
+                DisplayNumberSources.TargetId => (int)path.targetInfo.id + 1,
+                DisplayNumberSources.GdiDeviceName => TryGetGdiDeviceNumber(sourceDeviceName) ?? pathIndex + 1,
+                _ => (int)path.sourceInfo.id + 1
+            };
+        }
+
+        private static int? TryGetGdiDeviceNumber(string sourceDeviceName)
+        {
+            const string prefix = @"\\.\DISPLAY";
+            if (!sourceDeviceName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+
+            return int.TryParse(sourceDeviceName[prefix.Length..], out int displayNumber)
+                ? displayNumber
+                : null;
+        }
+
+        private static void AppendDiagnosticsHeader(StringBuilder diagnostics, string configuredDisplayNumberSource, string effectiveDisplayNumberSource)
+        {
+            diagnostics.AppendLine("ScaleSwitcher display diagnostics");
+            diagnostics.AppendLine($"timestamp={DateTimeOffset.Now:O}");
+            diagnostics.AppendLine($"baseDirectory={AppContext.BaseDirectory}");
+            diagnostics.AppendLine($"machineName={Environment.MachineName}");
+            diagnostics.AppendLine($"osVersion={Environment.OSVersion}");
+            diagnostics.AppendLine($"configuredDisplayNumberSource={configuredDisplayNumberSource}");
+            diagnostics.AppendLine($"effectiveDisplayNumberSource={effectiveDisplayNumberSource}");
+            diagnostics.AppendLine("effectiveDisplayNumberFormula=DISPLAYCONFIG_PATH_INFO.targetInfo.id + 1");
+        }
+
+        private static void AppendWindowsFormsScreenDiagnostics(StringBuilder diagnostics)
+        {
+            diagnostics.AppendLine();
+            diagnostics.AppendLine("[System.Windows.Forms.Screen]");
+            foreach (var screen in System.Windows.Forms.Screen.AllScreens)
+            {
+                diagnostics.AppendLine(
+                    $"device={screen.DeviceName}, primary={screen.Primary}, " +
+                    $"bounds=({screen.Bounds.Left},{screen.Bounds.Top})-({screen.Bounds.Right},{screen.Bounds.Bottom}), " +
+                    $"workingArea=({screen.WorkingArea.Left},{screen.WorkingArea.Top})-({screen.WorkingArea.Right},{screen.WorkingArea.Bottom}), " +
+                    $"bitsPerPixel={screen.BitsPerPixel}");
+            }
+        }
+
+        private static void WriteDisplayDiagnostics(StringBuilder diagnostics)
+        {
+            try
+            {
+                string path = Path.Combine(AppContext.BaseDirectory, "ScaleSwitcher.DisplayDiagnostics.log");
+                File.WriteAllText(path, diagnostics.ToString(), Encoding.UTF8);
+            }
+            catch
+            {
+                // Diagnostics must not prevent display enumeration.
+            }
         }
 
         private static void PopulateResolutions(DisplayInfo info)
@@ -194,7 +343,7 @@ namespace ScaleSwitcher.Models
 
             string oldResStr = info.CurrentResolution != null ? $"{info.CurrentResolution.Width}x{info.CurrentResolution.Height}" : "";
             string newResStr = $"{res.Width}x{res.Height}";
-            var osd = ShowOsd($"{oldResStr} → {newResStr}");
+            var osd = ShowOsd($"{oldResStr} → {newResStr}", info);
 
             var devMode = new NativeMethods.DEVMODE();
             devMode.dmSize = (short)Marshal.SizeOf(typeof(NativeMethods.DEVMODE));
@@ -231,7 +380,7 @@ namespace ScaleSwitcher.Models
 
             string oldDpiStr = info.CurrentDpi != null ? $"{info.CurrentDpi.Percentage}%" : "";
             string newDpiStr = $"{dpi.Percentage}%";
-            var osd = ShowOsd($"{oldDpiStr} → {newDpiStr}");
+            var osd = ShowOsd($"{oldDpiStr} → {newDpiStr}", info);
 
             bool success = NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETLOGICALDPIOVERRIDE, dpi.RelativeIndex, (IntPtr)info.MonitorIndex, 3);
             if (success)
@@ -254,30 +403,121 @@ namespace ScaleSwitcher.Models
             return success;
         }
 
-        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message)
+        public static void ShowDisplayInfoOsds()
+        {
+            HideDisplayInfoOsds();
+
+            var displays = GetDisplays();
+            foreach (var display in displays)
+            {
+                var osd = ShowOsd(BuildDisplayInfoMessage(display), display, 30, captureMouse: false, hideCursor: false);
+                if (osd != null)
+                {
+                    DisplayInfoOsds.Add(osd);
+                }
+            }
+        }
+
+        public static void HideDisplayInfoOsds()
+        {
+            if (DisplayInfoOsds.Count == 0) return;
+
+            if (System.Windows.Application.Current != null)
+            {
+                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                {
+                    foreach (var osd in DisplayInfoOsds)
+                    {
+                        osd.CloseWithFade();
+                    }
+                    DisplayInfoOsds.Clear();
+                });
+            }
+            else
+            {
+                DisplayInfoOsds.Clear();
+            }
+        }
+
+        private static string BuildDisplayInfoMessage(DisplayInfo display)
+        {
+            string resolution = display.CurrentResolution != null
+                ? $"{display.CurrentResolution.Width}x{display.CurrentResolution.Height}"
+                : "unknown";
+            string dpi = display.CurrentDpi != null ? $"{display.CurrentDpi.Percentage}%" : "unknown";
+
+            return string.Join(Environment.NewLine,
+                $"Windows settings display: {display.SettingsDisplayNumber}",
+                $"Monitor index: {display.MonitorIndex}",
+                $"Device: {display.DeviceName}",
+                $"Primary: {display.IsPrimary}",
+                $"Resolution: {resolution}",
+                $"Scale: {dpi}");
+        }
+
+        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message, DisplayInfo display)
+        {
+            return ShowOsd(message, display, 48, captureMouse: true, hideCursor: true);
+        }
+
+        private static ScaleSwitcher.Views.OsdWindow? ShowOsd(string message, DisplayInfo display, double fontSize, bool captureMouse, bool hideCursor)
         {
             ScaleSwitcher.Views.OsdWindow? osd = null;
             if (System.Windows.Application.Current != null && System.Windows.Application.Current.Dispatcher != null)
             {
                 System.Windows.Application.Current.Dispatcher.Invoke(() =>
                 {
-                    osd = new ScaleSwitcher.Views.OsdWindow(message);
-                    
-                    // 仮想スクリーン全体を覆うようにする
-                    var virtualScreen = System.Windows.Forms.SystemInformation.VirtualScreen;
-                    
-                    osd.Left = virtualScreen.Left;
-                    osd.Top = virtualScreen.Top;
-                    osd.Width = virtualScreen.Width;
-                    osd.Height = virtualScreen.Height;
+                    osd = new ScaleSwitcher.Views.OsdWindow(message, fontSize, hideCursor);
 
                     osd.Show();
-                    
-                    // Cursor="None" を確実に効かせるため、マウスをキャプチャする
-                    osd.CaptureMouse();
+                    PositionOsdOnDisplay(osd, display);
+
+                    if (captureMouse)
+                    {
+                        // Cursor="None" を確実に効かせるため、マウスをキャプチャする
+                        osd.CaptureMouse();
+                    }
                 });
             }
             return osd;
+        }
+
+        private static void PositionOsdOnDisplay(ScaleSwitcher.Views.OsdWindow osd, DisplayInfo display)
+        {
+            var mi = new NativeMethods.MONITORINFOEX();
+            mi.cbSize = Marshal.SizeOf(typeof(NativeMethods.MONITORINFOEX));
+
+            NativeMethods.Rect rect;
+            if (NativeMethods.GetMonitorInfo(display.MonitorHandle, ref mi))
+            {
+                rect = mi.rcMonitor;
+            }
+            else
+            {
+                var screen = System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == display.DeviceName)
+                             ?? System.Windows.Forms.Screen.PrimaryScreen;
+                if (screen == null) return;
+
+                rect = new NativeMethods.Rect
+                {
+                    left = screen.Bounds.Left,
+                    top = screen.Bounds.Top,
+                    right = screen.Bounds.Right,
+                    bottom = screen.Bounds.Bottom
+                };
+            }
+
+            var hwnd = new WindowInteropHelper(osd).Handle;
+            if (hwnd == IntPtr.Zero) return;
+
+            NativeMethods.SetWindowPos(
+                hwnd,
+                NativeMethods.HWND_TOPMOST,
+                rect.left,
+                rect.top,
+                rect.right - rect.left,
+                rect.bottom - rect.top,
+                NativeMethods.SWP_NOACTIVATE);
         }
 
         private static async void RestoreCursorPosition(int offsetX, int offsetY, string deviceName, ScaleSwitcher.Views.OsdWindow? osd)

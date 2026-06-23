@@ -50,6 +50,12 @@ namespace ScaleSwitcher.Services
             _ => "設定..."
         };
 
+        public string Menu_ShowDisplayInfo => _language switch
+        {
+            UiLanguage.English => "Show display info",
+            _ => "ディスプレイ情報を表示"
+        };
+
         public string Menu_Exit => _language switch
         {
             UiLanguage.English => "Exit",
@@ -72,6 +78,36 @@ namespace ScaleSwitcher.Services
         {
             UiLanguage.English => "Available Scales for Rotation:",
             _ => "ローテーションに含めるスケーリング:"
+        };
+
+        public string Settings_DisplayNumberSource => _language switch
+        {
+            UiLanguage.English => "Display Number Source:",
+            _ => "ディスプレイ番号の取得元:"
+        };
+
+        public string DisplayNumberSource_PathOrder => _language switch
+        {
+            UiLanguage.English => "pathOrderDisplayNumber",
+            _ => "pathOrderDisplayNumber"
+        };
+
+        public string DisplayNumberSource_SourceId => _language switch
+        {
+            UiLanguage.English => "sourceIdDisplayNumber",
+            _ => "sourceIdDisplayNumber"
+        };
+
+        public string DisplayNumberSource_TargetId => _language switch
+        {
+            UiLanguage.English => "targetIdDisplayNumber",
+            _ => "targetIdDisplayNumber"
+        };
+
+        public string DisplayNumberSource_GdiDeviceName => _language switch
+        {
+            UiLanguage.English => "gdiDeviceDisplayNumber",
+            _ => "gdiDeviceDisplayNumber"
         };
 
         public string Settings_Save => _language switch

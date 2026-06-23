@@ -5,8 +5,8 @@
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" Focusable="False" Cursor="None">
     <Grid>
-        <Border Background="#CC000000" CornerRadius="20" Padding="40" HorizontalAlignment="Center" VerticalAlignment="Center">
-            <TextBlock x:Name="MessageText" Foreground="White" FontSize="48" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <Border Background="#CC000000" CornerRadius="20" Padding="40" HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="900">
+            <TextBlock x:Name="MessageText" Foreground="White" FontSize="48" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center" TextWrapping="Wrap" />
         </Border>
     </Grid>
 </Window>
