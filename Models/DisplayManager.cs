@@ -10,6 +10,8 @@ namespace ScaleSwitcher.Models
 {
     public static class DisplayManager
     {
+        private const int DefaultDpi = 96;
+        private const int CursorRestoreDelayMs = 1500;
         private static readonly int[] DpiArray = { 100, 125, 150, 175, 200, 225, 250, 300, 350, 400, 450, 500 };
         private static readonly List<ScaleSwitcher.Views.OsdWindow> DisplayInfoOsds = new();
 
@@ -99,79 +101,94 @@ namespace ScaleSwitcher.Models
             diagnostics.AppendLine("[DISPLAYCONFIG_PATH_INFO]");
             for (int i = 0; i < pathCount; i++)
             {
-                var sourceName = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
-                {
-                    header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
-                    {
-                        type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-                        size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
-                        adapterId = paths[i].sourceInfo.adapterId,
-                        id = paths[i].sourceInfo.id
-                    },
-                    viewGdiDeviceName = new string('\0', 32)
-                };
-
-                string sourceDeviceName = "";
-                int? gdiDeviceDisplayNumber = null;
-                int selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, i, paths[i], sourceDeviceName);
-                if (NativeMethods.DisplayConfigGetDeviceInfo(ref sourceName) == 0)
-                {
-                    sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
-                    gdiDeviceDisplayNumber = TryGetGdiDeviceNumber(sourceDeviceName);
-                    selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, i, paths[i], sourceDeviceName);
-                    if (!string.IsNullOrWhiteSpace(sourceDeviceName))
-                    {
-                        result.TryAdd(sourceDeviceName, selectedDisplayNumber);
-                    }
-                }
-
-                var targetName = new NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME
-                {
-                    header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
-                    {
-                        type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
-                        size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME>(),
-                        adapterId = paths[i].targetInfo.adapterId,
-                        id = paths[i].targetInfo.id
-                    },
-                    monitorFriendlyDeviceName = new string('\0', 64),
-                    monitorDevicePath = new string('\0', 128)
-                };
-
-                string targetFriendlyName = "";
-                string targetDevicePath = "";
-                uint targetNameFlags = 0;
-                uint connectorInstance = 0;
-                ushort edidManufactureId = 0;
-                ushort edidProductCodeId = 0;
-                int targetNameResult = NativeMethods.DisplayConfigGetDeviceInfo(ref targetName);
-                if (targetNameResult == 0)
-                {
-                    targetFriendlyName = targetName.monitorFriendlyDeviceName.TrimEnd('\0');
-                    targetDevicePath = targetName.monitorDevicePath.TrimEnd('\0');
-                    targetNameFlags = targetName.flags;
-                    connectorInstance = targetName.connectorInstance;
-                    edidManufactureId = targetName.edidManufactureId;
-                    edidProductCodeId = targetName.edidProductCodeId;
-                }
-
-                diagnostics.AppendLine(
-                    $"pathIndex={i}, sourceAdapter=({paths[i].sourceInfo.adapterId.HighPart},{paths[i].sourceInfo.adapterId.LowPart}), " +
-                    $"sourceId={paths[i].sourceInfo.id}, sourceModeInfoIdx={paths[i].sourceInfo.modeInfoIdx}, sourceStatusFlags=0x{paths[i].sourceInfo.statusFlags:X8}, " +
-                    $"gdiDevice={sourceDeviceName}, pathOrderDisplayNumber={i + 1}, sourceIdDisplayNumber={(int)paths[i].sourceInfo.id + 1}, " +
-                    $"targetIdDisplayNumber={(int)paths[i].targetInfo.id + 1}, gdiDeviceDisplayNumber={gdiDeviceDisplayNumber?.ToString() ?? ""}, " +
-                    $"selectedDisplayNumber={selectedDisplayNumber}, " +
-                    $"targetAdapter=({paths[i].targetInfo.adapterId.HighPart},{paths[i].targetInfo.adapterId.LowPart}), targetId={paths[i].targetInfo.id}, " +
-                    $"targetModeInfoIdx={paths[i].targetInfo.modeInfoIdx}, outputTechnology={paths[i].targetInfo.outputTechnology}, rotation={paths[i].targetInfo.rotation}, " +
-                    $"scaling={paths[i].targetInfo.scaling}, refresh={paths[i].targetInfo.refreshRate.Numerator}/{paths[i].targetInfo.refreshRate.Denominator}, " +
-                    $"scanLineOrdering={paths[i].targetInfo.scanLineOrdering}, targetAvailable={paths[i].targetInfo.targetAvailable}, " +
-                    $"targetStatusFlags=0x{paths[i].targetInfo.statusFlags:X8}, pathFlags=0x{paths[i].flags:X8}, " +
-                    $"targetNameResult={targetNameResult}, targetNameFlags=0x{targetNameFlags:X8}, connectorInstance={connectorInstance}, " +
-                    $"edidManufactureId=0x{edidManufactureId:X4}, edidProductCodeId=0x{edidProductCodeId:X4}, " +
-                    $"monitorFriendlyName={targetFriendlyName}, monitorDevicePath={targetDevicePath}");
+                ProcessDisplayConfigPath(i, paths[i], displayNumberSource, result, diagnostics);
             }
 
             return result;
+        }
+
+        private static void ProcessDisplayConfigPath(
+            int pathIndex,
+            NativeMethods.DISPLAYCONFIG_PATH_INFO path,
+            string displayNumberSource,
+            Dictionary<string, int> result,
+            StringBuilder diagnostics)
+        {
+            var sourceName = new NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME
+            {
+                header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
+                {
+                    type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_SOURCE_DEVICE_NAME>(),
+                    adapterId = path.sourceInfo.adapterId,
+                    id = path.sourceInfo.id
+                },
+                viewGdiDeviceName = new string('\0', 32)
+            };
+
+            string sourceDeviceName = "";
+            int? gdiDeviceDisplayNumber = null;
+            int selectedDisplayNumber;
+
+            if (NativeMethods.DisplayConfigGetDeviceInfo(ref sourceName) == 0)
+            {
+                sourceDeviceName = sourceName.viewGdiDeviceName.TrimEnd('\0');
+                gdiDeviceDisplayNumber = TryGetGdiDeviceNumber(sourceDeviceName);
+                selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, pathIndex, path, sourceDeviceName);
+                if (!string.IsNullOrWhiteSpace(sourceDeviceName))
+                {
+                    result.TryAdd(sourceDeviceName, selectedDisplayNumber);
+                }
+            }
+            else
+            {
+                selectedDisplayNumber = ResolveDisplayNumber(displayNumberSource, pathIndex, path, sourceDeviceName);
+            }
+
+            var targetName = new NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME
+            {
+                header = new NativeMethods.DISPLAYCONFIG_DEVICE_INFO_HEADER
+                {
+                    type = NativeMethods.DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
+                    size = (uint)Marshal.SizeOf<NativeMethods.DISPLAYCONFIG_TARGET_DEVICE_NAME>(),
+                    adapterId = path.targetInfo.adapterId,
+                    id = path.targetInfo.id
+                },
+                monitorFriendlyDeviceName = new string('\0', 64),
+                monitorDevicePath = new string('\0', 128)
+            };
+
+            string targetFriendlyName = "";
+            string targetDevicePath = "";
+            uint targetNameFlags = 0;
+            uint connectorInstance = 0;
+            ushort edidManufactureId = 0;
+            ushort edidProductCodeId = 0;
+            int targetNameResult = NativeMethods.DisplayConfigGetDeviceInfo(ref targetName);
+            if (targetNameResult == 0)
+            {
+                targetFriendlyName = targetName.monitorFriendlyDeviceName.TrimEnd('\0');
+                targetDevicePath = targetName.monitorDevicePath.TrimEnd('\0');
+                targetNameFlags = targetName.flags;
+                connectorInstance = targetName.connectorInstance;
+                edidManufactureId = targetName.edidManufactureId;
+                edidProductCodeId = targetName.edidProductCodeId;
+            }
+
+            diagnostics.AppendLine(
+                $"pathIndex={pathIndex}, sourceAdapter=({path.sourceInfo.adapterId.HighPart},{path.sourceInfo.adapterId.LowPart}), " +
+                $"sourceId={path.sourceInfo.id}, sourceModeInfoIdx={path.sourceInfo.modeInfoIdx}, sourceStatusFlags=0x{path.sourceInfo.statusFlags:X8}, " +
+                $"gdiDevice={sourceDeviceName}, pathOrderDisplayNumber={pathIndex + 1}, sourceIdDisplayNumber={(int)path.sourceInfo.id + 1}, " +
+                $"targetIdDisplayNumber={(int)path.targetInfo.id + 1}, gdiDeviceDisplayNumber={gdiDeviceDisplayNumber?.ToString() ?? ""}, " +
+                $"selectedDisplayNumber={selectedDisplayNumber}, " +
+                $"targetAdapter=({path.targetInfo.adapterId.HighPart},{path.targetInfo.adapterId.LowPart}), targetId={path.targetInfo.id}, " +
+                $"targetModeInfoIdx={path.targetInfo.modeInfoIdx}, outputTechnology={path.targetInfo.outputTechnology}, rotation={path.targetInfo.rotation}, " +
+                $"scaling={path.targetInfo.scaling}, refresh={path.targetInfo.refreshRate.Numerator}/{path.targetInfo.refreshRate.Denominator}, " +
+                $"scanLineOrdering={path.targetInfo.scanLineOrdering}, targetAvailable={path.targetInfo.targetAvailable}, " +
+                $"targetStatusFlags=0x{path.targetInfo.statusFlags:X8}, pathFlags=0x{path.flags:X8}, " +
+                $"targetNameResult={targetNameResult}, targetNameFlags=0x{targetNameFlags:X8}, connectorInstance={connectorInstance}, " +
+                $"edidManufactureId=0x{edidManufactureId:X4}, edidProductCodeId=0x{edidProductCodeId:X4}, " +
+                $"monitorFriendlyName={targetFriendlyName}, monitorDevicePath={targetDevicePath}");
         }
 
         private static int ResolveDisplayNumber(string displayNumberSource, int pathIndex, NativeMethods.DISPLAYCONFIG_PATH_INFO path, string sourceDeviceName)
@@ -266,7 +283,7 @@ namespace ScaleSwitcher.Models
         {
             // Get current DPI percentage
             NativeMethods.GetDpiForMonitor(info.MonitorHandle, 0, out uint dpiX, out _);
-            int currentPercentage = (int)(dpiX * 100 / 96);
+            int currentPercentage = (int)(dpiX * 100 / DefaultDpi);
 
             int recommendedPercentage;
             if (RecommendedDpiCache.TryGetValue(info.DeviceName, out int cachedRecommended))
@@ -351,7 +368,7 @@ namespace ScaleSwitcher.Models
             {
                 devMode.dmPelsWidth = res.Width;
                 devMode.dmPelsHeight = res.Height;
-                devMode.dmFields = 0x00080000 | 0x00100000; // DM_PELSWIDTH | DM_PELSHEIGHT
+                devMode.dmFields = NativeMethods.DM_PELSWIDTH | NativeMethods.DM_PELSHEIGHT;
 
                 int result = NativeMethods.ChangeDisplaySettingsEx(info.DeviceName, ref devMode, IntPtr.Zero, 0, IntPtr.Zero);
                 if (result == NativeMethods.DISP_CHANGE_SUCCESSFUL)
@@ -382,7 +399,7 @@ namespace ScaleSwitcher.Models
             string newDpiStr = $"{dpi.Percentage}%";
             var osd = ShowOsd($"{oldDpiStr} → {newDpiStr}", info);
 
-            bool success = NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETLOGICALDPIOVERRIDE, dpi.RelativeIndex, (IntPtr)info.MonitorIndex, 3);
+            bool success = NativeMethods.SystemParametersInfo(NativeMethods.SPI_SETLOGICALDPIOVERRIDE, dpi.RelativeIndex, (IntPtr)info.MonitorIndex, NativeMethods.SPIF_UPDATEINIFILE | NativeMethods.SPIF_SENDCHANGE);
             if (success)
             {
                 // スケーリング変更時は、タスクバー等のサイズが変わるためDPIの比率をオフセットにかける
@@ -521,7 +538,7 @@ namespace ScaleSwitcher.Models
         private static async void RestoreCursorPosition(int offsetX, int offsetY, string deviceName, ScaleSwitcher.Views.OsdWindow? osd)
         {
             // OSによる画面レイアウトの再構成とマウスの中央リセット処理が完了するのを少し待つ
-            await System.Threading.Tasks.Task.Delay(1500);
+            await System.Threading.Tasks.Task.Delay(CursorRestoreDelayMs);
 
             var screenObj = System.Windows.Forms.Screen.AllScreens.FirstOrDefault(s => s.DeviceName == deviceName) 
                          ?? System.Windows.Forms.Screen.PrimaryScreen;

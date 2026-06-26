@@ -161,28 +161,8 @@ namespace ScaleSwitcher
             if (displays.Count == 1)
             {
                 var display = displays[0];
-
-                // Scale SubMenu (Top Level)
-                var scaleSubMenu = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Scale);
-                foreach (var dpi in display.AvailableDpis.OrderBy(d => d.Percentage))
-                {
-                    var dpiItem = new Forms.ToolStripMenuItem($"{dpi.Percentage}%");
-                    dpiItem.Checked = (display.CurrentDpi?.Percentage == dpi.Percentage);
-                    dpiItem.Click += (s, ev) => DisplayManager.SetDpi(display, dpi);
-                    scaleSubMenu.DropDownItems.Add(dpiItem);
-                }
-                menu.Items.Add(scaleSubMenu);
-
-                // Resolution SubMenu (Top Level)
-                var resSubMenu = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Resolution);
-                foreach (var res in display.AvailableResolutions)
-                {
-                    var resItem = new Forms.ToolStripMenuItem($"{res.Width} x {res.Height}");
-                    resItem.Checked = (display.CurrentResolution != null && display.CurrentResolution.Equals(res));
-                    resItem.Click += (s, ev) => DisplayManager.SetResolution(display, res);
-                    resSubMenu.DropDownItems.Add(resItem);
-                }
-                menu.Items.Add(resSubMenu);
+                menu.Items.Add(CreateScaleSubMenu(display));
+                menu.Items.Add(CreateResolutionSubMenu(display));
             }
             else
             {
@@ -192,28 +172,8 @@ namespace ScaleSwitcher
                     string displayName = GetMenuDisplayName(display, i);
 
                     var displayMenu = new Forms.ToolStripMenuItem(displayName);
-
-                    // Scale SubMenu
-                    var scaleSubMenu = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Scale);
-                    foreach (var dpi in display.AvailableDpis.OrderBy(d => d.Percentage))
-                    {
-                        var dpiItem = new Forms.ToolStripMenuItem($"{dpi.Percentage}%");
-                        dpiItem.Checked = (display.CurrentDpi?.Percentage == dpi.Percentage);
-                        dpiItem.Click += (s, ev) => DisplayManager.SetDpi(display, dpi);
-                        scaleSubMenu.DropDownItems.Add(dpiItem);
-                    }
-                    displayMenu.DropDownItems.Add(scaleSubMenu);
-
-                    // Resolution SubMenu
-                    var resSubMenu = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Resolution);
-                    foreach (var res in display.AvailableResolutions)
-                    {
-                        var resItem = new Forms.ToolStripMenuItem($"{res.Width} x {res.Height}");
-                        resItem.Checked = (display.CurrentResolution != null && display.CurrentResolution.Equals(res));
-                        resItem.Click += (s, ev) => DisplayManager.SetResolution(display, res);
-                        resSubMenu.DropDownItems.Add(resItem);
-                    }
-                    displayMenu.DropDownItems.Add(resSubMenu);
+                    displayMenu.DropDownItems.Add(CreateScaleSubMenu(display));
+                    displayMenu.DropDownItems.Add(CreateResolutionSubMenu(display));
 
                     menu.Items.Add(displayMenu);
                 }
@@ -224,6 +184,41 @@ namespace ScaleSwitcher
                 menu.Items.Add(new Forms.ToolStripSeparator());
             }
 
+            AddSystemMenuItems(menu);
+        }
+
+        private static Forms.ToolStripMenuItem CreateScaleSubMenu(DisplayInfo display)
+        {
+            var scaleSubMenu = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Scale);
+            foreach (var dpi in display.AvailableDpis.OrderBy(d => d.Percentage))
+            {
+                var dpiItem = new Forms.ToolStripMenuItem($"{dpi.Percentage}%")
+                {
+                    Checked = display.CurrentDpi?.Percentage == dpi.Percentage
+                };
+                dpiItem.Click += (s, ev) => DisplayManager.SetDpi(display, dpi);
+                scaleSubMenu.DropDownItems.Add(dpiItem);
+            }
+            return scaleSubMenu;
+        }
+
+        private static Forms.ToolStripMenuItem CreateResolutionSubMenu(DisplayInfo display)
+        {
+            var resSubMenu = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_Resolution);
+            foreach (var res in display.AvailableResolutions)
+            {
+                var resItem = new Forms.ToolStripMenuItem($"{res.Width} x {res.Height}")
+                {
+                    Checked = display.CurrentResolution != null && display.CurrentResolution.Equals(res)
+                };
+                resItem.Click += (s, ev) => DisplayManager.SetResolution(display, res);
+                resSubMenu.DropDownItems.Add(resItem);
+            }
+            return resSubMenu;
+        }
+
+        private void AddSystemMenuItems(Forms.ContextMenuStrip menu)
+        {
             var runAtStartupItem = new Forms.ToolStripMenuItem(AppLocalization.Instance.Menu_RunAtStartup)
             {
                 CheckOnClick = true,

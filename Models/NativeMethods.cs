@@ -14,6 +14,10 @@ namespace ScaleSwitcher.Models
         public const uint DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME = 2;
         public static readonly IntPtr HWND_TOPMOST = new(-1);
         public const uint SWP_NOACTIVATE = 0x0010;
+        public const int DM_PELSWIDTH = 0x00080000;
+        public const int DM_PELSHEIGHT = 0x00100000;
+        public const uint SPIF_UPDATEINIFILE = 0x01;
+        public const uint SPIF_SENDCHANGE = 0x02;
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
         public static extern bool SystemParametersInfo(uint uiAction, int uiParam, IntPtr pvParam, uint fWinIni);
